@@ -1,0 +1,30 @@
+localDevelopment:
+  enabled: true
+
+service:
+  replicaCount: 1
+  image:
+    pullPolicy: Never
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+externalSecrets:
+  enabled: false
+
+autoscaling:
+  enabled: false
+
+pdb:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+ingress:
+  enabled: false

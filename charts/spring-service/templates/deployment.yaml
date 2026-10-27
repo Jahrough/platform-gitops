@@ -18,7 +18,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: {{ include "spring-service.name" . }}
-          image: "{{ required "service.image.repository is required" .Values.service.image.repository }}@{{ include "spring-service.imageDigest" . }}"
+          image: "{{ include "spring-service.imageReference" . }}"
           imagePullPolicy: {{ .Values.service.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}

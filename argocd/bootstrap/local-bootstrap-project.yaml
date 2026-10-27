@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-local-bootstrap
+  namespace: argocd
+spec:
+  description: Restricted bootstrap project for local GitOps Applications
+  sourceRepos:
+    - https://github.com/Jahrough/platform-gitops.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: argoproj.io
+      kind: Application
+    - group: argoproj.io
+      kind: AppProject

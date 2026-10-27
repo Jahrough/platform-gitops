@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-local
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  description: Local product service workloads only
+  sourceRepos:
+    - https://github.com/Jahrough/platform-gitops.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: platform-local
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service

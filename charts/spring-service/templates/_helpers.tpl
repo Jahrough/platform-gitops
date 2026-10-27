@@ -20,6 +20,16 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
 {{- required (printf "images.%s digest is required" .Values.service.name) $digest -}}
 {{- end -}}
 
+{{- define "spring-service.imageReference" -}}
+{{- $repository := required "service.image.repository is required" .Values.service.image.repository -}}
+{{- if .Values.localDevelopment.enabled -}}
+{{- $tag := required "service.image.tag is required when localDevelopment.enabled" .Values.service.image.tag -}}
+{{- printf "%s:%s" $repository $tag -}}
+{{- else -}}
+{{- printf "%s@%s" $repository (include "spring-service.imageDigest" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "spring-service.envSecretName" -}}
 {{- if eq .secret "database" -}}
 {{- printf "%s-db" $.Values.service.name -}}

@@ -25,12 +25,14 @@ flowchart TB
   end
 
   subgraph gitops["platform-gitops — versioned desired state"]
-    config["Root manifest · AppProject · child Applications<br/>Spring Helm chart + environment values<br/>CDC Kustomize resources"]
+    config["Cloud root · AppProject · child Applications<br/>Spring Helm chart + cloud values<br/>CDC Kustomize resources"]
+    localConfig["Local root · restricted AppProject<br/>Local service Applications + Helm values"]
   end
 
-  subgraph infra["platform-infrastructure — Terraform"]
+  subgraph infra["platform-infrastructure — Terraform + local development"]
     direction TB
     terraform["VPC / EKS foundations<br/>AWS-managed add-ons<br/>IAM / IRSA · Secrets Manager<br/>RDS · MSK · Redis · OpenSearch"]
+    compose["Docker Compose<br/>local apps + dependencies"]
   end
 
   subgraph target["Intended Amazon EKS target — live state unverified"]
@@ -41,11 +43,22 @@ flowchart TB
     argocd -->|"manual sync"| workloads
   end
 
+  subgraph localTarget["Optional local cluster — not provisioned"]
+    direction TB
+    localArgo["Local Argo CD<br/>(installation prerequisite)"]
+    localWorkloads["Catalog + Search<br/>platform-local namespace"]
+    localArgo -->|"manual sync"| localWorkloads
+  end
+
   operator["Authorized operator"]
   operator -->|"kubectl apply root manifest"| config
   config -. "Argo CD reads Git source" .-> argocd
+  operator -->|"applies local bootstrap separately"| localConfig
+  localConfig -. "Git source on reachable branch" .-> localArgo
   registry -->|"image pulls"| workloads
   terraform -->|"provisions"| eks
+  appRepos -->|"Compose build contexts"| compose
+  appRepos -. "local build + image load" .-> localWorkloads
 
   classDef source fill:#e8f5e9,stroke:#2e7d32,color:#102a13
   classDef gitopsNode fill:#e8eaf6,stroke:#3949ab,color:#151b45
@@ -53,9 +66,9 @@ flowchart TB
   classDef infraNode fill:#fff3e0,stroke:#ef6c00,color:#3e2410
   classDef external fill:#f5f5f5,stroke:#616161,color:#212121
   class appRepos,cdcBuild source
-  class config gitopsNode
-  class eks,argocd,workloads targetNode
-  class terraform infraNode
+  class config,localConfig gitopsNode
+  class eks,argocd,workloads,localArgo,localWorkloads targetNode
+  class terraform,compose infraNode
   class registry external
 ```
 
@@ -68,7 +81,9 @@ and intended relationships, not live status.
 Runtime detail is collapsed for readability: External Secrets uses
 Terraform-provisioned IRSA to read AWS Secrets Manager and materialize
 referenced Kubernetes Secrets; workloads consume configured endpoints for
-Terraform-managed data services.
+Terraform-managed data services. The optional local Argo CD path is configured
+in Git but not installed or tested; the existing Compose dependencies are not
+directly reachable from local Kubernetes pods without additional networking.
 
 ## Ownership boundaries
 
@@ -91,14 +106,17 @@ repository; do not reconcile both roots against the same resources.
 ```text
 argocd/
   bootstrap/root-app.yaml       # Manually applied root Application
+  bootstrap/local-*.yaml        # Restricted local bootstrap; separately applied
   projects/platform.yaml        # Restricted source/destination/resource boundary
   apps/                         # Child Applications
+  local/                        # Local-only project and service Applications
 charts/spring-service/          # Reusable Helm chart for Spring Boot workloads
   templates/                    # Deployment, Service, secrets, scaling, policies, optional ingress
   values/
     product-catalog.yaml         # Service-specific settings
     product-search.yaml
-    environments/                # Per-environment replicas, digests, secret IDs
+    environments/                # Cloud environment values plus local defaults
+    local/                       # Local service-specific values
 kubernetes/platform/
   providers/aws/
     cluster-secret-store.yaml    # AWS-specific External Secrets configuration
@@ -108,13 +126,14 @@ scripts/                         # Production image pinning and optional ingress
 ```
 
 Helm is the primary service deployment format: one reusable chart renders
-either service, and Argo CD combines the service values file with one
-environment values file. Production values render autoscalers, disruption
-budgets, and service-specific egress policies; ingress remains disabled until
-the domain and certificate are configured. Kafka Connect uses a small
-Kustomize base because it is a separate platform runtime, not a Spring
-service. Upstream components are consumed as pinned Helm charts directly
-through Argo CD.
+either service, and Argo CD combines service-specific values with environment
+values. Cloud environments require image digests; the opt-in local profile
+uses locally built tags and disables External Secrets and cloud-only resources.
+Production values render autoscalers, disruption budgets, and service-specific
+egress policies; ingress remains disabled until the domain and certificate
+are configured. Kafka Connect uses a small Kustomize base because it is a
+separate platform runtime, not a Spring service. Upstream components are
+consumed as pinned Helm charts directly through Argo CD.
 
 The `platform` AppProject restricts repository sources and destination
 namespaces. Its resource allowlists cover the External Secrets and AWS Load
@@ -288,8 +307,88 @@ balancer is provisioned.
 ## Local development, monitoring, and exposure
 
 Run local application development from the service repositories or the
-infrastructure repository's Compose setup. No Kubernetes cluster or paid
-cloud resources are required for that workflow.
+infrastructure repository's Compose setup. From the infrastructure repository
+root, with the three repositories checked out as siblings:
+
+```sh
+export POSTGRES_PASSWORD='use-a-local-development-password'
+docker compose -f compose/compose.yml -f compose/compose.apps.yaml up --build
+```
+
+Compose starts both applications and local PostgreSQL, Redis, Kafka,
+OpenSearch, and Kafka Connect. The app endpoints are `http://localhost:8080`
+and `http://localhost:8081`. The local OpenSearch security plugin is disabled;
+keep this stack on a trusted development machine. Stop it with the matching
+`docker compose ... down` command; named volumes preserve local data.
+
+### Optional local Kubernetes and Argo CD
+
+The local Argo CD configuration is separate from the cloud root and restricted
+to the `platform-local` namespace. It deploys only the two service charts,
+uses locally built images, and does not install External Secrets, the AWS Load
+Balancer Controller, CDC, ingress, or cluster-scoped resources. All local
+Applications use manual sync. A local Argo CD installation and cluster are
+prerequisites and are **not** created by this repository workflow.
+
+The local service values expect reachable dependency services named
+`postgres`, `redis`, `kafka`, and `elasticsearch` in `platform-local`. The
+Compose stack's service DNS names and loopback-bound host ports are not
+reachable from cluster pods as-is. Do not sync the local service Applications
+until those endpoints and the local database Secret are available. This
+repository does not yet provide a Kubernetes dependency stack or a Compose to
+cluster network bridge; Compose remains the supported full-stack local runtime.
+
+When a local cluster and Argo CD have been separately approved and prepared:
+
+1. Verify `kubectl config current-context` identifies the intended local
+   cluster, not an EKS context. Create the target namespace if needed:
+
+   ```sh
+   kubectl create namespace platform-local
+   ```
+
+2. Build and load local images from sibling service checkouts:
+
+   ```sh
+   docker build -t ghcr.io/jahrough/product-catalog:local ../product-catalog
+   docker build -t ghcr.io/jahrough/product-search:local ../product-search
+   kind load docker-image --name <local-cluster> \
+     ghcr.io/jahrough/product-catalog:local \
+     ghcr.io/jahrough/product-search:local
+   ```
+
+3. Create `product-catalog-db` and `product-search-db` Secrets in
+   `platform-local` with a local-only `password` key. For example, set
+   `LOCAL_POSTGRES_PASSWORD` in the shell without echoing it:
+
+   ```sh
+   kubectl create secret generic product-catalog-db \
+     --namespace platform-local \
+     --from-literal=password="${LOCAL_POSTGRES_PASSWORD:?Set LOCAL_POSTGRES_PASSWORD}"
+   kubectl create secret generic product-search-db \
+     --namespace platform-local \
+     --from-literal=password="${LOCAL_POSTGRES_PASSWORD:?Set LOCAL_POSTGRES_PASSWORD}"
+   ```
+
+   Do not commit the value or reuse a cloud credential.
+4. Apply the restricted bootstrap project and local root only after Argo CD is
+   installed:
+
+   ```sh
+   kubectl apply -f argocd/bootstrap/local-bootstrap-project.yaml
+   kubectl apply -f argocd/bootstrap/local-root-app.yaml
+   ```
+
+5. Manually sync `platform-local-root`, then sync an individual service
+   Application only after its dependency endpoints and Secret are ready.
+   Verify Argo CD sync/health, rollout status, pod events, and logs.
+
+Argo CD reads Git, not a developer's uncommitted working tree. These local
+Applications default to `main`; for a feature-branch test, make the
+`targetRevision` in the local root and both local service Applications match
+the same pushed, reviewed branch. Do not change or apply the cloud root for
+local testing. Local cluster creation, Argo CD installation, and sync are
+separate operator actions requiring explicit approval.
 
 The applications expose Spring Actuator health endpoints used for probes.
 Prometheus/Grafana and an OpenTelemetry Collector/backend are not deployed by

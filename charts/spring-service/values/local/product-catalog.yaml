@@ -1,0 +1,26 @@
+service:
+  image:
+    repository: ghcr.io/jahrough/product-catalog
+    tag: local
+  env:
+    - name: SPRING_PROFILES_ACTIVE
+      value: docker
+    - name: DB_HOST
+      value: postgres
+    - name: DB_PORT
+      value: "5432"
+    - name: DB_NAME
+      value: product_catalog
+    - name: DB_USER
+      value: postgres
+    - name: DB_PASSWORD
+      secret: database
+      key: password
+    - name: REDIS_HOST
+      value: redis
+    - name: REDIS_PORT
+      value: "6379"
+    - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+      value: kafka:9092
+    - name: SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL
+      value: PLAINTEXT

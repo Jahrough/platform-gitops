@@ -1,0 +1,24 @@
+service:
+  image:
+    repository: ghcr.io/jahrough/product-search
+    tag: local
+  env:
+    - name: SPRING_PROFILES_ACTIVE
+      value: docker
+    - name: REDIS_HOST
+      value: redis
+    - name: REDIS_PORT
+      value: "6379"
+    - name: SPRING_DATASOURCE_URL
+      value: jdbc:postgresql://postgres:5432/product_catalog
+    - name: SPRING_DATASOURCE_USERNAME
+      value: postgres
+    - name: SPRING_DATASOURCE_PASSWORD
+      secret: database
+      key: password
+    - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+      value: kafka:9092
+    - name: SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL
+      value: PLAINTEXT
+    - name: APP_OPENSEARCH_URIS
+      value: http://elasticsearch:9200

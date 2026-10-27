@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: product-search-local
+  namespace: argocd
+spec:
+  project: platform-local
+  source:
+    repoURL: https://github.com/Jahrough/platform-gitops.git
+    targetRevision: main
+    path: charts/spring-service
+    helm:
+      releaseName: product-search
+      valueFiles:
+        - values/product-search.yaml
+        - values/environments/local.yaml
+        - values/local/product-search.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-local
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false

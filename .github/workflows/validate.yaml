@@ -72,6 +72,63 @@ jobs:
             fi
           done
 
+      - name: Render local service profiles and check cloud isolation
+        run: |
+          set -euo pipefail
+          for service in product-catalog product-search; do
+            rendered="/tmp/${service}-local.yaml"
+            helm template "$service" charts/spring-service \
+              --namespace platform-local \
+              --values "charts/spring-service/values/${service}.yaml" \
+              --values charts/spring-service/values/environments/local.yaml \
+              --values "charts/spring-service/values/local/${service}.yaml" \
+              > "$rendered"
+            grep -q "ghcr.io/jahrough/${service}:local" "$rendered"
+            if grep -Eq '^kind: (ExternalSecret|HorizontalPodAutoscaler|PodDisruptionBudget|NetworkPolicy|Ingress)$' "$rendered"; then
+              echo "Cloud-only resource rendered for ${service} local profile." >&2
+              exit 1
+            fi
+          done
+
+      - name: Check local Argo CD project boundaries
+        run: |
+          ruby -e '
+            require "yaml"
+            project = YAML.load_file("argocd/local/project.yaml")
+            spec = project.fetch("spec")
+            abort "Local project has cluster resource permissions" unless spec.fetch("clusterResourceWhitelist") == []
+            destinations = spec.fetch("destinations")
+            abort "Local project can target a non-local namespace" unless
+              destinations == [{"server" => "https://kubernetes.default.svc", "namespace" => "platform-local"}]
+            abort "Local project can read an unapproved source" unless
+              spec.fetch("sourceRepos") == ["https://github.com/Jahrough/platform-gitops.git"]
+            bootstrap = YAML.load_file("argocd/bootstrap/local-bootstrap-project.yaml")
+            bootstrap_spec = bootstrap.fetch("spec")
+            abort "Local bootstrap project has cluster resource permissions" unless
+              bootstrap_spec.fetch("clusterResourceWhitelist") == []
+            local_root = YAML.load_file("argocd/bootstrap/local-root-app.yaml")
+            root_spec = local_root.fetch("spec")
+            abort "Local root does not target the local configuration path" unless
+              root_spec.dig("source", "path") == "argocd/local"
+            abort "Local root uses the wrong bootstrap project" unless
+              root_spec.fetch("project") == "platform-local-bootstrap"
+            local_apps = Dir.glob("argocd/local/apps/*.yaml").map { |file| YAML.load_file(file) }
+            abort "Expected exactly two local service Applications" unless local_apps.length == 2
+            local_apps.each do |app|
+              app_spec = app.fetch("spec")
+              abort "Local Application targets a non-local namespace" unless
+                app_spec.dig("destination", "namespace") == "platform-local"
+              abort "Local Application uses an unexpected project" unless
+                app_spec.fetch("project") == "platform-local"
+              abort "Local Application source differs from the approved repository" unless
+                app_spec.dig("source", "repoURL") == "https://github.com/Jahrough/platform-gitops.git"
+            end
+            cloud_root = YAML.load_file("argocd/bootstrap/root-app.yaml")
+            exclusions = cloud_root.dig("spec", "source", "directory", "exclude")
+            abort "Cloud root can discover local Applications" unless
+              exclusions.include?("local/**")
+          '
+
       - name: Render Kafka Connect resources
         run: |
           kubectl kustomize kubernetes/platform/cdc \

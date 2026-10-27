@@ -11,6 +11,9 @@ service:
   database:
     properties: []
 
+localDevelopment:
+  enabled: false
+
 images:
   product-catalog: >-
     sha256:0000000000000000000000000000000000000000000000000000000000000000
@@ -26,6 +29,7 @@ resources:
     memory: 1Gi
 
 externalSecrets:
+  enabled: true
   refreshInterval: 1h
   storeName: aws-secrets-manager
   runtimeConfig:
