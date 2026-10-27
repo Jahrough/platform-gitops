@@ -1,0 +1,55 @@
+name: Validate GitOps manifests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint chart
+        run: |
+          helm lint charts/spring-service \
+            -f charts/spring-service/values/product-catalog.yaml \
+            -f charts/spring-service/values/environments/dev.yaml
+
+      - name: Parse Argo CD, values, and provider manifests
+        run: |
+          ruby -e '
+            require "yaml"
+            files = Dir.glob("argocd/**/*.yaml") +
+              Dir.glob("charts/spring-service/Chart.yaml") +
+              Dir.glob("charts/spring-service/values/**/*.yaml") +
+              Dir.glob("kubernetes/**/*.yaml")
+            files.each { |file| YAML.load_file(file) }
+            puts "Parsed #{files.length} YAML files"
+          '
+
+      - name: Render every service and environment
+        run: |
+          set -euo pipefail
+          for service in product-catalog product-search; do
+            for environment in dev staging production; do
+              namespace="platform-${environment}"
+              helm template "$service" charts/spring-service \
+                --namespace "$namespace" \
+                --values "charts/spring-service/values/${service}.yaml" \
+                --values "charts/spring-service/values/environments/${environment}.yaml" \
+                >/dev/null
+            done
+          done
+
+      - name: Validate cluster-scoped manifest YAML
+        run: test -s kubernetes/platform/providers/aws/cluster-secret-store.yaml

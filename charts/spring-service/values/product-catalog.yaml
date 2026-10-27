@@ -1,0 +1,62 @@
+service:
+  name: product-catalog
+  serviceName: product-catalog-service
+  port: 8080
+  image:
+    repository: ghcr.io/jahrough/product-catalog
+  env:
+    - name: SPRING_PROFILES_ACTIVE
+      value: prod
+    - name: DB_HOST
+      secret: runtime-config
+      key: DB_HOST
+    - name: DB_PORT
+      secret: runtime-config
+      key: DB_PORT
+    - name: DB_NAME
+      secret: runtime-config
+      key: DB_NAME
+    - name: DB_USER
+      secret: database
+      key: username
+    - name: DB_PASSWORD
+      secret: database
+      key: password
+    - name: REDIS_HOST
+      secret: runtime-config
+      key: REDIS_HOST
+    - name: REDIS_PORT
+      secret: runtime-config
+      key: REDIS_PORT
+    - name: SPRING_DATA_REDIS_PASSWORD
+      secret: cache-auth
+      key: password
+    - name: SPRING_DATA_REDIS_SSL_ENABLED
+      value: "true"
+    - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+      secret: runtime-config
+      key: KAFKA_BOOTSTRAP_SERVERS
+    - name: SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL
+      value: SSL
+  database:
+    properties:
+      - username
+      - password
+  runtimeConfigProperties:
+    - DB_HOST
+    - DB_PORT
+    - DB_NAME
+    - REDIS_HOST
+    - REDIS_PORT
+    - KAFKA_BOOTSTRAP_SERVERS
+  httpGet:
+    livenessPath: /actuator/health/liveness
+    readinessPath: /actuator/health/readiness
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi

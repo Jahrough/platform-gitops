@@ -1,0 +1,6 @@
+apiVersion: v2
+name: spring-service
+description: Reusable Kubernetes deployment chart for Spring Boot services
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

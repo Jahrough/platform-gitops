@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-cluster-config
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/Jahrough/platform-gitops.git
+    targetRevision: main
+    path: kubernetes/platform/providers/aws
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-secrets

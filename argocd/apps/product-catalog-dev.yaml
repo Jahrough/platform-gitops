@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: product-catalog-dev
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/Jahrough/platform-gitops.git
+    targetRevision: main
+    path: charts/spring-service
+    helm:
+      releaseName: product-catalog
+      valueFiles:
+        - values/product-catalog.yaml
+        - values/environments/dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-dev
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
