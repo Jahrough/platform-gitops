@@ -1,5 +1,7 @@
 service:
   name: product-search
+  autoscalingMaxReplicas: 10
+  ingressSubdomain: search
   port: 8081
   image:
     repository: ghcr.io/jahrough/product-search
@@ -57,3 +59,10 @@ resources:
   limits:
     cpu: "2"
     memory: 2Gi
+
+networkPolicy:
+  egressPorts:
+    - 5432
+    - 443
+    - 6379
+    - 9094

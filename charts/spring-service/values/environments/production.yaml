@@ -2,15 +2,34 @@ service:
   replicaCount: 2
 
 images:
-  product-catalog: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  product-search: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  product-catalog: >-
+    sha256:0000000000000000000000000000000000000000000000000000000000000000
+  product-search: >-
+    sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 externalSecrets:
   runtimeConfig:
-    remoteKey: REPLACE_ME_WITH_PRODUCTION_RUNTIME_CONFIG_SECRET_NAME
+    remoteKey: REPLACE_ME
   cacheAuth:
-    remoteKey: REPLACE_ME_WITH_PRODUCTION_CACHE_AUTH_SECRET_NAME
+    remoteKey: REPLACE_ME
   database:
     remoteKeys:
-      product-catalog: REPLACE_ME_WITH_PRODUCTION_CATALOG_DB_SECRET_NAME
-      product-search: REPLACE_ME_WITH_PRODUCTION_SEARCH_DB_SECRET_NAME
+      product-catalog: REPLACE_ME
+      product-search: REPLACE_ME
+
+autoscaling:
+  enabled: true
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  vpcCidr: 10.0.0.0/16
+
+ingress:
+  enabled: false
+  scheme: internet-facing
+  domain: ""
+  certificateArn: ""

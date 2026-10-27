@@ -12,8 +12,10 @@ service:
     properties: []
 
 images:
-  product-catalog: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  product-search: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  product-catalog: >-
+    sha256:0000000000000000000000000000000000000000000000000000000000000000
+  product-search: >-
+    sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 resources:
   requests:
@@ -33,6 +35,27 @@ externalSecrets:
     property: password
   database:
     remoteKeys: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  targetCPUUtilization: 70
+  targetMemoryUtilization: 80
+
+pdb:
+  enabled: false
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  vpcCidr: ""
+  egressPorts: []
+
+ingress:
+  enabled: false
+  scheme: internal
+  domain: ""
+  certificateArn: ""
 
 podSecurityContext:
   runAsNonRoot: true

@@ -19,6 +19,11 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.33.0
+
       - name: Lint chart
         run: |
           helm lint charts/spring-service \
@@ -43,13 +48,42 @@ jobs:
           for service in product-catalog product-search; do
             for environment in dev staging production; do
               namespace="platform-${environment}"
+              service_values="charts/spring-service/values/${service}.yaml"
+              environment_values="charts/spring-service/values/environments/${environment}.yaml"
               helm template "$service" charts/spring-service \
                 --namespace "$namespace" \
-                --values "charts/spring-service/values/${service}.yaml" \
-                --values "charts/spring-service/values/environments/${environment}.yaml" \
-                >/dev/null
+                --values "$service_values" \
+                --values "$environment_values" \
+                > "/tmp/${service}-${environment}.yaml"
             done
           done
 
-      - name: Validate cluster-scoped manifest YAML
-        run: test -s kubernetes/platform/providers/aws/cluster-secret-store.yaml
+      - name: Check production platform resources render
+        run: |
+          set -euo pipefail
+          for service in product-catalog product-search; do
+            rendered="/tmp/${service}-production.yaml"
+            grep -q '^kind: HorizontalPodAutoscaler$' "$rendered"
+            grep -q '^kind: PodDisruptionBudget$' "$rendered"
+            grep -q '^kind: NetworkPolicy$' "$rendered"
+            if grep -q '^kind: Ingress$' "$rendered"; then
+              echo "Unexpected production ingress rendering." >&2
+              exit 1
+            fi
+          done
+
+      - name: Render Kafka Connect resources
+        run: |
+          kubectl kustomize kubernetes/platform/cdc \
+            > /tmp/product-cdc.yaml
+
+      - name: Parse rendered manifests
+        run: |
+          ruby -e '
+            require "yaml"
+            ARGV.each { |file| YAML.load_stream(File.read(file)) }
+            puts "Rendered manifests are valid YAML"
+          ' /tmp/product-*.yaml
+
+      - name: Test GitOps helper scripts
+        run: python -m unittest discover -s tests -v

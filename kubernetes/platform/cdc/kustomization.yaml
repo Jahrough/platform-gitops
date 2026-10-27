@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - kafka-connect.yaml
+  - platform-cdc-db.external-secret.yaml
+  - platform-runtime-config.external-secret.yaml
+  - network-policy.yaml
+
+images:
+  - name: >-
+      ghcr.io/jahrough/platform-infrastructure/kafka-connect
+    digest: >-
+      sha256:0000000000000000000000000000000000000000000000000000000000000000
