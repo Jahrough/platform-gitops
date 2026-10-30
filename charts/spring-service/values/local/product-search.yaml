@@ -10,7 +10,7 @@ service:
     - name: REDIS_PORT
       value: "6379"
     - name: SPRING_DATASOURCE_URL
-      value: jdbc:postgresql://postgres:5432/product_catalog
+      value: jdbc:postgresql://postgres:5432/product_search
     - name: SPRING_DATASOURCE_USERNAME
       value: postgres
     - name: SPRING_DATASOURCE_PASSWORD
