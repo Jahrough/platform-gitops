@@ -89,11 +89,11 @@ directly reachable from local Kubernetes pods without additional networking.
 
 ## Ownership boundaries
 
-| Owner | Responsibilities |
-| --- | --- |
-| Terraform / `platform-infrastructure` | VPC, EKS, IAM/IRSA, AWS-managed EKS add-ons, managed PostgreSQL, Kafka, Redis and OpenSearch, Secrets Manager resources, and infrastructure outputs |
-| Service repositories | Application source, Dockerfiles, tests, APIs, migrations, event contracts, and service-specific behavior |
-| `platform-gitops` | Argo CD projects/applications, Helm-installed Kubernetes controllers, workloads, services, probes, resource sizing, NetworkPolicies, environment configuration, and references to externally managed secrets |
+| Owner                                 | Responsibilities                                                                                                                                                                                             |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Terraform / `platform-infrastructure` | VPC, EKS, IAM/IRSA, AWS-managed EKS add-ons, managed PostgreSQL, Kafka, Redis and OpenSearch, Secrets Manager resources, and infrastructure outputs                                                          |
+| Service repositories                  | Application source, Dockerfiles, tests, APIs, migrations, event contracts, and service-specific behavior                                                                                                     |
+| `platform-gitops`                     | Argo CD projects/applications, Helm-installed Kubernetes controllers, workloads, services, probes, resource sizing, NetworkPolicies, environment configuration, and references to externally managed secrets |
 
 Do not configure Terraform and Argo CD to manage the same Kubernetes resource.
 The source manifests and Applications previously declared in
@@ -102,6 +102,34 @@ That source change does not establish whether an older Argo CD root is active
 in a cluster. Before syncing, inventory live Applications and resources from
 an authorized operator context and deliberately transfer the root to this
 repository; do not reconcile both roots against the same resources.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart TD
+    inventory["Inventory live Argo CD Applications<br/>and resources<br/>from an authorized operator context"]
+    old{"Older root from<br/>platform-infrastructure<br/>active in the cluster?"}
+    switch["Deliberately switch the existing<br/>platform-root source<br/>to this repository"]
+    apply["Apply this repository's<br/>root Application"]
+    sync(["Manually sync platform-root"])
+    both(["Never reconcile both roots<br/>against the same resources"])
+
+    inventory --> old
+    old -->|"yes"| switch
+    old -->|"no"| apply
+    switch --> sync
+    apply --> sync
+    old -.->|"avoid"| both
+
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef gate fill:#21262d,stroke:#d29922,stroke-width:2px,color:#e6edf3
+    classDef danger fill:#21262d,stroke:#f85149,stroke-width:2px,color:#e6edf3
+    classDef terminal fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class inventory,switch,apply internal
+    class old gate
+    class both danger
+    class sync terminal
+```
 
 ## Repository layout
 
@@ -137,11 +165,79 @@ are configured. Kafka Connect uses a small Kustomize base because it is a
 separate platform runtime, not a Spring service. Upstream components are
 consumed as pinned Helm charts directly through Argo CD.
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart LR
+    chart["charts/spring-service<br/>Deployment, Service, secrets,<br/>scaling, policies, optional ingress"]
+    svcvals["Service values<br/>product-catalog.yaml<br/>product-search.yaml"]
+    envvals["Cloud environment values<br/>dev, staging, production<br/>image digest required"]
+    localvals["Local profile<br/>locally built tags<br/>External Secrets and<br/>cloud-only resources disabled"]
+    argocd["Argo CD<br/>combines chart and values"]
+    rendered["Rendered service workload"]
+    prod["Production only<br/>autoscalers, disruption budgets,<br/>service-specific egress policies"]
+    ingress["Ingress<br/>disabled until domain and<br/>certificate are configured"]
+
+    svcvals --> argocd
+    envvals --> argocd
+    localvals -.->|"opt-in"| argocd
+    chart --> argocd
+    argocd --> rendered
+    envvals -.-> prod
+    prod -.-> rendered
+    ingress -.-> rendered
+
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef external fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class argocd core
+    class chart,svcvals,envvals,rendered internal
+    class localvals,prod,ingress external
+```
+
 The `platform` AppProject restricts repository sources and destination
 namespaces. Its resource allowlists cover the External Secrets and AWS Load
 Balancer controller integrations, cluster-scoped AWS ClusterSecretStore,
 and the namespaced workload resources. Review rendered chart resources before
 tightening or expanding those lists.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart LR
+    op(["Authorized operator"])
+    root["platform-root<br/>argocd/bootstrap/root-app.yaml"]
+    proj["AppProject: platform<br/>restricted sources, destinations,<br/>and resource kinds"]
+
+    subgraph children["Child Applications — all manual sync"]
+        eso["External Secrets Operator<br/>pinned Helm chart"]
+        cfg["platform-cluster-config<br/>AWS ClusterSecretStore"]
+        alb["AWS Load Balancer Controller<br/>pinned Helm chart"]
+        cdc["CDC: Kafka Connect<br/>Kustomize, production"]
+        svc["Catalog + Search<br/>6 Applications<br/>dev, staging, production"]
+    end
+
+    subgraph localside["Local path — separate, restricted to platform-local"]
+        lproj["Local bootstrap AppProject"]
+        lroot["platform-local-root"]
+        lsvc["Local Catalog + Search<br/>Applications"]
+    end
+
+    op -->|"kubectl apply"| root
+    root -->|"creates and reconciles"| proj
+    root -->|"creates and reconciles"| children
+    op -->|"applies separately"| lproj
+    op -->|"applies separately"| lroot
+    lroot -->|"creates and reconciles"| lsvc
+
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef terminal fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class root,lroot core
+    class proj,eso,cfg,alb,cdc,svc,lproj,lsvc internal
+    class op terminal
+```
+
+Syncing the root creates only the AppProject and child Application objects; it
+does not authorize service deployment.
 
 ## Cross-repository ownership and migration
 
@@ -151,12 +247,71 @@ infrastructure outputs. The infrastructure configuration helper writes
 reviewed role ARNs, region, and Secrets Manager identifiers into this
 repository's placeholders; it does not transfer or reveal secret values.
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart LR
+    tf["Terraform<br/>IAM / IRSA<br/>Secrets Manager resources"]
+    helper["configure-argocd-from-terraform.py<br/>platform-infrastructure helper"]
+    git["Reviewed Git change<br/>role ARNs, region, secret identifiers<br/>no secret values"]
+    sm[("AWS Secrets Manager<br/>per-environment values")]
+    eso["External Secrets Operator<br/>assumes IRSA role"]
+    css["ClusterSecretStore<br/>AWS provider"]
+    secrets["Kubernetes Secrets"]
+    pods["Workloads"]
+
+    tf -->|"non-secret outputs"| helper
+    helper -->|"writes placeholders"| git
+    git -->|"configures"| eso
+    git -->|"configures"| css
+    eso -->|"reads"| sm
+    css --- eso
+    eso -->|"materializes referenced secrets"| secrets
+    secrets --> pods
+
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef external fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class eso core
+    class tf,helper,git,css,secrets,pods internal
+    class sm external
+```
+
 The AWS Load Balancer Controller and CDC Applications are defined here.
 The controller is manually synced and requires the Terraform-created IAM role.
 CDC is a separate manually synced Kustomize application; wait until the
 catalog migration has created `public.outbox`, RDS logical replication is
 active, and the CDC database credential exists before syncing it and
 registering the connector.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart LR
+    p1["Catalog migration has<br/>created public.outbox"]
+    p2["RDS logical replication<br/>is active"]
+    p3["CDC database credential<br/>exists"]
+    p4["Kafka Connect image digest<br/>published and pinned"]
+    ready{"All prerequisites<br/>ready?"}
+    sync["Manually sync<br/>CDC Application"]
+    register(["Register connector<br/>from a trusted host<br/>interim config in platform-infrastructure"])
+    wait(["Wait: do not sync CDC"])
+
+    p1 --> ready
+    p2 --> ready
+    p3 --> ready
+    p4 --> ready
+    ready -->|"yes"| sync
+    sync --> register
+    ready -->|"no"| wait
+
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef gate fill:#21262d,stroke:#d29922,stroke-width:2px,color:#e6edf3
+    classDef terminal fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class p1,p2,p3,p4 internal
+    class sync core
+    class ready gate
+    class register,wait terminal
+```
 
 The source move does not prove that the old infrastructure root is inactive.
 Before applying the GitOps root in an existing cluster, inspect actual
@@ -217,6 +372,7 @@ references with secret values.
    Before a production sync, run
    `python3 scripts/validate-production-config.py` to check that AWS
    placeholders and zero image digests have been replaced.
+
 5. Review and merge those Git changes. Apply only the root Application:
 
    ```sh
@@ -240,6 +396,47 @@ All child Applications are manual-sync. The root only creates/reconciles the
 Argo CD Application and AppProject objects; syncing the root does not authorize
 service deployment.
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart TD
+    s1["1. Review runbooks<br/>provision infrastructure separately<br/>no Terraform from this repository"]
+    s2["2. Confirm cluster access<br/>inventory Applications and owners<br/>agree a migration if needed"]
+    s3["3. Configure External Secrets role and<br/>ClusterSecretStore region from Terraform outputs<br/>review and commit non-secret settings"]
+    s4["4. Pin reviewed image digests<br/>set-image-digests.py<br/>production: validate-production-config.py"]
+    s5["5. Review and merge Git changes<br/>kubectl apply root-app.yaml only"]
+    s6["6. Manually sync platform-root"]
+    s6a["Sync External Secrets Operator first"]
+    g6a{"Deployment and CRDs<br/>healthy?"}
+    s6b["Sync platform-cluster-config"]
+    g6b{"ClusterSecretStore<br/>Ready?"}
+    g7{"Secret references and<br/>images ready?"}
+    s7["7. Sync one environment's<br/>service Application<br/>verify health, rollout, events, logs"]
+    g8{"CDC prerequisites<br/>ready?"}
+    s8["8. Sync CDC Application<br/>register connector from a trusted host"]
+    hold(["Stop and resolve before continuing"])
+
+    s1 --> s2 --> s3 --> s4 --> s5 --> s6 --> s6a --> g6a
+    g6a -->|"yes"| s6b
+    g6a -->|"no"| hold
+    s6b --> g6b
+    g6b -->|"yes"| g7
+    g6b -->|"no"| hold
+    g7 -->|"yes"| s7
+    g7 -->|"no"| hold
+    s7 --> g8
+    g8 -->|"yes"| s8
+    g8 -->|"no"| hold
+
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef gate fill:#21262d,stroke:#d29922,stroke-width:2px,color:#e6edf3
+    classDef terminal fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class s1,s2,s3,s4,s5,s6a,s6b internal
+    class s6,s7,s8 core
+    class g6a,g6b,g7,g8 gate
+    class hold terminal
+```
+
 ## Image promotion
 
 Service CI publishes images to:
@@ -255,6 +452,43 @@ between environments rather than rebuilding. This repository does not
 currently have a verified published digest; all-zero fail-closed pins must be
 replaced before the corresponding Application is synced.
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart LR
+    ci["Service CI and<br/>Kafka Connect workflow"]
+    ghcr[("GHCR<br/>product-catalog<br/>product-search<br/>kafka-connect")]
+    digest{"Reviewed immutable digest<br/>from a successful build?"}
+    script["scripts/set-image-digests.py"]
+    svcvals["Environment service values"]
+    cdcpin["CDC Kustomize image pin<br/>kubernetes/platform/cdc/kustomization.yaml"]
+    review["Review and merge"]
+    sync["Manual sync of<br/>the Application"]
+    zero(["All-zero pins stay in place<br/>image pull fails closed"])
+    promote["Promote the same tested digest<br/>dev, then staging, then production<br/>never rebuild or use latest"]
+
+    ci -->|"publishes"| ghcr
+    ghcr --> digest
+    digest -->|"yes"| script
+    digest -->|"no"| zero
+    script --> svcvals
+    script -->|"production, Connect digest"| cdcpin
+    svcvals --> review
+    cdcpin --> review
+    review --> sync
+    review -.-> promote
+
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef gate fill:#21262d,stroke:#d29922,stroke-width:2px,color:#e6edf3
+    classDef danger fill:#21262d,stroke:#f85149,stroke-width:2px,color:#e6edf3
+    classDef terminal fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class ci,ghcr,script,svcvals,cdcpin,review internal
+    class sync core
+    class digest gate
+    class zero danger
+    class promote terminal
+```
+
 ## Rollback
 
 Revert the Git commit that changed the image digest or Kubernetes settings,
@@ -262,6 +496,26 @@ merge the revert, and manually sync the affected Application. Verify the
 Deployment rollout and application health. Application data migrations and
 managed-service recovery belong to the service/infrastructure owners; a
 manifest rollback does not reverse database changes.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart LR
+    revert["Revert the Git commit<br/>that changed the digest<br/>or Kubernetes settings"]
+    merge["Merge the revert"]
+    sync["Manually sync the<br/>affected Application"]
+    verify["Verify Deployment rollout<br/>and application health"]
+    data(["Database changes are not reversed<br/>owned by service and<br/>infrastructure owners"])
+
+    revert --> merge --> sync --> verify
+    verify -.-> data
+
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef terminal fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class revert,merge,verify internal
+    class sync core
+    class data terminal
+```
 
 ## Validation
 
@@ -286,6 +540,36 @@ chart structure and template output; it does not prove live API compatibility,
 CRDs, cloud values, image availability, Argo CD sync status, or workload
 health.
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart LR
+    trigger(["validate.yaml workflow"])
+
+    subgraph checks["Checks"]
+        lint["helm lint"]
+        render["Render all six<br/>service and environment<br/>combinations"]
+        policy["Validate production<br/>policy resources"]
+        kustomize["Render CDC<br/>Kustomize configuration"]
+        parse["Parse rendered YAML"]
+        scripts["Test helper scripts"]
+    end
+
+    gaps(["Not proven by these checks<br/>live API compatibility, CRDs, cloud values,<br/>image availability, Argo CD sync status,<br/>workload health"])
+
+    trigger --> lint
+    trigger --> render
+    trigger --> policy
+    trigger --> kustomize
+    trigger --> parse
+    trigger --> scripts
+    checks -.-> gaps
+
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef terminal fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class lint,render,policy,kustomize,parse,scripts internal
+    class trigger,gaps terminal
+```
+
 ## Optional ingress
 
 The ALB controller Application must be configured from Terraform outputs and
@@ -305,6 +589,43 @@ services publicly; the product APIs' authentication requirements must be
 reviewed before choosing it. Review and commit the GitOps change, sync the
 Applications only after approval, then create DNS records after the load
 balancer is provisioned.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart LR
+    alb["ALB controller Application<br/>configured from Terraform outputs<br/>and synced"]
+    run["scripts/enable-ingress.py<br/>domain, ACM certificate,<br/>region, scheme"]
+    prod["Production values only<br/>ingress enabled"]
+    scheme{"Scheme"}
+    internal["internal"]
+    public["internet-facing<br/>exposes services publicly<br/>review API authentication first"]
+    commit["Review and commit<br/>GitOps change"]
+    approve{"Approved?"}
+    sync["Sync Applications"]
+    dns(["Create DNS records after the<br/>load balancer is provisioned"])
+    hold(["Do not sync"])
+
+    alb --> run --> prod --> scheme
+    scheme --> internal
+    scheme --> public
+    internal --> commit
+    public --> commit
+    commit --> approve
+    approve -->|"yes"| sync
+    approve -->|"no"| hold
+    sync --> dns
+
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef gate fill:#21262d,stroke:#d29922,stroke-width:2px,color:#e6edf3
+    classDef danger fill:#21262d,stroke:#f85149,stroke-width:2px,color:#e6edf3
+    classDef terminal fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class alb,run,prod,commit,internal internal
+    class sync core
+    class scheme,approve gate
+    class public danger
+    class dns,hold terminal
+```
 
 ## Local development, monitoring, and exposure
 
@@ -340,6 +661,33 @@ until those endpoints and the local database Secret are available. This
 repository does not yet provide a Kubernetes dependency stack or a Compose to
 cluster network bridge; Compose remains the supported full-stack local runtime.
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#8b949e', 'edgeLabelBackground': '#21262d', 'primaryTextColor': '#e6edf3', 'tertiaryTextColor': '#e6edf3', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#e6edf3'}}}%%
+flowchart TD
+    prereq(["Separately approved local cluster<br/>and Argo CD installation<br/>not created by this repository"])
+    l1["1. Verify kubectl context is the local cluster<br/>not EKS<br/>create platform-local namespace"]
+    l2["2. Build and load local images<br/>from sibling service checkouts"]
+    l3["3. Create product-catalog-db and<br/>product-search-db Secrets<br/>local-only password, never committed"]
+    l4["4. Apply local bootstrap project<br/>and local root Application"]
+    l5["5. Manually sync platform-local-root"]
+    ready{"Dependency endpoints<br/>postgres, redis, kafka, elasticsearch<br/>and Secrets ready?"}
+    svc["Sync an individual service Application<br/>verify sync, health, rollout, events, logs"]
+    hold(["Do not sync service Applications yet"])
+
+    prereq --> l1 --> l2 --> l3 --> l4 --> l5 --> ready
+    ready -->|"yes"| svc
+    ready -->|"no"| hold
+
+    classDef core fill:#1f6feb,stroke:#79c0ff,stroke-width:2px,color:#ffffff
+    classDef internal fill:#21262d,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef gate fill:#21262d,stroke:#d29922,stroke-width:2px,color:#e6edf3
+    classDef terminal fill:#21262d,stroke:#8b949e,stroke-width:2px,stroke-dasharray:5 5,color:#e6edf3
+    class l1,l2,l3,l4,l5 internal
+    class svc core
+    class ready gate
+    class prereq,hold terminal
+```
+
 When a local cluster and Argo CD have been separately approved and prepared:
 
 1. Verify `kubectl config current-context` identifies the intended local
@@ -373,6 +721,7 @@ When a local cluster and Argo CD have been separately approved and prepared:
    ```
 
    Do not commit the value or reuse a cloud credential.
+
 4. Apply the restricted bootstrap project and local root only after Argo CD is
    installed:
 
